@@ -35,8 +35,8 @@ block once the estimate has been raised to meet the evidence, or block a ticket 
 `estimate-override` label was put on. Judging the estimate the team *first* gave, rather than
 whatever is in the field now, is what stops the ratchet: raise 4h to 10.5h and it says
 "confirmed", not "and now 10.5h isn't enough either". An override is not a silence - the receipt at Done carries `overridden: true`, so the team can
-see which warnings were waved away. Grading those separately from warnings is the obvious next
-cut on the scorecard.
+see which warnings were waved away. The scorecard grades each override on its own: "overridden,
+we were right" or "overridden, team was right".
 
 It fails open on any error - a bug in our app must never lock a team out of their own board.
 And it only exists on transitions an admin chose, so installing Estimate Guard cannot break
@@ -114,7 +114,7 @@ Two deliberate design choices:
 - All user/LLM-supplied values are regex-validated or JQL-quoted before reaching Jira.
   Panels run `api.asUser()`; only the receipt comment uses `api.asApp()` (a webhook has no
   interactive session, and a refused comment must never cost us the receipt).
-- 16 unit tests: `npm test`.
+- 26 unit tests: `npm test`.
 
 ## Install (about 3 minutes)
 
@@ -202,5 +202,3 @@ the workflow draft; the validator then appears in the transition list with its o
 | 2:50 | Rovo Chat, ask "what will a db-migration bug really take?" | "Same tools, conversational." |
 | 3:15 | MCP tools list in Rovo Studio | "Same tools, exposed over MCP - so any agent in the company can ask before it plans." |
 | 3:35 | Card | "Estimate Guard. Ship with the numbers you actually earned." |
-#   E s t i m a t e - G u a r d  
- 

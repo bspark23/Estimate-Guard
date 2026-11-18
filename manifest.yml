@@ -1,0 +1,170 @@
+modules:
+  # 1. PREDICT - panel on an open ticket: what will this really take, and prove it.
+  jira:issuePanel:
+    - key: estimate-guard-issue-panel
+      resource: issue-panel
+      resolver:
+        function: resolver
+      render: native
+      title: Estimate Guard
+      icon: https://developer.atlassian.com/platform/forge/images/icons/issue-panel-icon.svg
+
+  # 2. SCORE - project page: bias map, and how often our warnings were right.
+  jira:projectPage:
+    - key: estimate-guard-project-page
+      resource: project-page
+      resolver:
+        function: resolver
+      render: native
+      title: Estimate Guard
+
+  # 2b. GATE - the warning becomes a wall. A validator on the "start work" transition
+  # refuses a ticket the team's own finished tickets prove is under-estimated. It only
+  # fires where an admin has added it, so installing Estimate Guard cannot break a board.
+  jira:workflowValidator:
+    - key: estimate-guard-start
+      name: Estimate Guard - estimate is evidence-backed
+      description: >-
+        Refuses to start work on a ticket whose estimate is far below what this team's own
+        finished tickets prove it costs. Clears itself once the estimate has been recounted.
+      function: guard-start-fn
+      projectTypes:
+        - company-managed
+        - team-managed
+
+  # 3. SETTLE - grade every ticket that reaches Done against what we predicted.
+  # The handler itself checks for a status change into Done.
+  trigger:
+    - key: estimate-guard-settled
+      events:
+        - avi:jira:updated:issue
+      function: on-issue-updated
+
+  # 4. ASK - Rovo agent over the same two tools the panels use.
+  rovo:agent:
+    - key: estimate-coach
+      name: Estimate Coach
+      description: >-
+        Predicts what a ticket will really take from your own completed work, and
+        grades the team's estimation accuracy over time.
+      prompt: |
+        You are Estimate Coach. You help a team plan work using evidence from their
+        own completed Jira issues, never from generic advice.
+
+        Tools:
+        - predictEffort: returns what comparable finished tickets cost, the verdict
+          (trustworthy, optimistic, severe, unknown), a suggested range in hours, and
+          up to 3 exemplar issues with keys and links.
+        - getAccuracyScorecard: returns drift per label and issue type, hours of
+          unplanned work, and how often past warnings were correct.
+
+        Rules:
+        - Always cite the exemplar issue keys you were given. Never invent a number.
+        - Drift is actual / planned. 1.0 is exact, above 1.5 means the team is
+          systematically under-estimating.
+        - If basis is "clock", the evidence is calendar time from creation to done,
+          not logged work. Say it is directional, and never quote it as an overrun.
+        - If sampleSize is under 5, say the answer rests on few tickets.
+        - If verdict is unknown, say there is not enough history yet instead of guessing.
+        - Recommend a range, not a single number, and mention the unplanned hours at stake.
+        - Bias belongs to areas of work, never to individuals. Do not rank people.
+      conversationStarters:
+        - What will a backend ticket really take?
+        - Where do we underestimate the most in this project?
+        - Were your warnings actually right?
+      actions:
+        - predict-effort
+        - accuracy-scorecard
+
+  # 5. SHARE - the same two actions, also exposed as an MCP server, so any external
+  # agent (Rovo Studio, Claude, Cursor) can ask the same question. Tools reference the
+  # actions declared above; they are not declared twice.
+  rovo:mcp:
+    - key: estimate-guard-mcp
+      name: Estimate Guard
+      tools:
+        - predict-effort
+        - accuracy-scorecard
+
+  action:
+    - key: predict-effort
+      name: Predict effort
+      function: predict-effort-fn
+      actionVerb: GET
+      description: >-
+        Predict the real effort for a ticket from this team's own completed issues.
+        Returns a verdict (trustworthy, optimistic, severe, unknown), a suggested hours
+        range, and up to 3 exemplar issues with keys, hours and links.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: false
+          description: Jira project key, for example ENG. Optional when the user is viewing an issue.
+        label:
+          title: Label
+          type: string
+          required: false
+          description: Label identifying the area of work, for example backend or db-migration.
+        issueType:
+          title: Issue type
+          type: string
+          required: false
+          description: Issue type name, for example Bug, Story or Task.
+        summary:
+          title: Summary
+          type: string
+          required: false
+          description: Ticket summary. Used to rank the closest past tickets.
+        hours:
+          title: Planned hours
+          type: number
+          required: false
+          description: >-
+            The estimate being considered, in hours. Omit it to ask what the estimate
+            should be instead.
+
+    - key: accuracy-scorecard
+      name: Get accuracy scorecard
+      function: scorecard-fn
+      actionVerb: GET
+      description: >-
+        Estimation accuracy for a project: median drift per label and issue type, total
+        hours of unplanned work, and what share of past warnings proved correct.
+      inputs:
+        projectKey:
+          title: Project key
+          type: string
+          required: false
+          description: Jira project key, for example ENG.
+
+  function:
+    - key: resolver
+      handler: index.handler
+    - key: on-issue-updated
+      handler: index.onIssueUpdated
+    - key: guard-start-fn
+      handler: index.validateEstimateGuard
+    - key: predict-effort-fn
+      handler: index.predictEffort
+    - key: scorecard-fn
+      handler: index.getAccuracyScorecard
+
+resources:
+  - key: project-page
+    path: src/frontend/projectPage.jsx
+  - key: issue-panel
+    path: src/frontend/issuePanel.jsx
+
+app:
+  runtime:
+    name: nodejs24.x
+  id: ari:cloud:ecosystem::app/3b80011a-d78f-4c9b-bb50-d0eaab8d7507
+
+permissions:
+  scopes:
+    - read:jira-work
+    # write:jira-work is used only by the "Recount" button, which updates the
+    # original estimate as the signed-in user.
+    - write:jira-work
+    - storage:app
