@@ -340,3 +340,10 @@ test('cited examples are the typical overruns, not an accurate outlier', () => {
   assert.equal(result.exemplars.some((e) => e.key === 'X-5'), false);
   assert.ok(result.exemplars.every((e) => e.ratio >= 2));
 });
+
+test('the demo marker label never becomes a row in the accuracy table', async () => {
+  const { groupTable, DEMO_LABEL } = await import('../src/lib/evidence.js');
+  const rows = groupTable([raw({ key: 'D-1', labels: ['backend', DEMO_LABEL], estHours: 4, spentHours: 10, tookDays: 1 })]);
+  assert.equal(rows.some((r) => r.name === DEMO_LABEL), false);
+  assert.ok(rows.some((r) => r.name === 'backend'));
+});

@@ -3,6 +3,7 @@ import api, { route } from '@forge/api';
 import {
   CLOCK_RATIO_CAP,
   DRIFT_THRESHOLD,
+  DEMO_LABEL,
   OVERRIDE_LABEL,
   SECONDS_PER_HOUR,
   baselineHours,
@@ -16,6 +17,7 @@ import {
   toHours,
 } from './lib/evidence';
 import {
+  clearHistory,
   getAdjustment,
   getPrediction,
   listReceipts,
@@ -177,6 +179,91 @@ resolver.define('getProjectScorecard', async ({ context }) => {
     grading: scorecard(settled),
     recent: settled.sort((a, b) => (b.resolvedAt ?? 0) - (a.resolvedAt ?? 0)).slice(0, 10),
   };
+});
+
+// ---------- Demo history: one click to try the app on an empty project ----------
+
+// Same story as the video: backend runs ~2.5x over, frontend is accurate.
+const DEMO_TICKETS = [
+  ['Payments API endpoint', 'backend', 4, 10],
+  ['Auth token refresh', 'backend', 4, 9],
+  ['Refunds endpoint', 'backend', 4, 11],
+  ['Ledger sync job', 'backend', 4, 10],
+  ['Login page layout', 'frontend', 4, 4],
+  ['Settings form', 'frontend', 4, 5],
+  ['Navbar dropdown', 'frontend', 4, 4],
+  ['Footer links', 'frontend', 4, 4],
+];
+
+async function jira(path, options = {}, what = 'Jira request') {
+  const res = await api.asUser().requestJira(path, {
+    ...options,
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...options.headers },
+  });
+  return readJson(res, what);
+}
+
+async function createDemoTicket(projectKey, issueTypeId, [summary, label, estimate, spent]) {
+  let created;
+  try {
+    created = await jira(route`/rest/api/3/issue`, {
+      method: 'POST',
+      body: JSON.stringify({
+        fields: {
+          project: { key: projectKey },
+          issuetype: { id: issueTypeId },
+          summary,
+          labels: [label, DEMO_LABEL],
+          timetracking: { originalEstimate: `${estimate}h` },
+        },
+      }),
+    }, `Creating "${summary}"`);
+  } catch (err) {
+    if (/timetracking|time tracking|originalestimate/i.test(err.message)) {
+      throw new Error(
+        'Jira refused the Original estimate field. Turn on time tracking (Settings > System > Time tracking), ' +
+          'and add "Original estimate" and "Time tracking" to this work type (Space settings > Work types > Task), then try again.',
+      );
+    }
+    throw err;
+  }
+
+  const key = created.key;
+  await jira(route`/rest/api/3/issue/${key}/worklog?adjustEstimate=leave`, {
+    method: 'POST',
+    body: JSON.stringify({ timeSpentSeconds: spent * SECONDS_PER_HOUR }),
+  }, `Logging time on ${key}`);
+
+  const { transitions = [] } = await jira(route`/rest/api/3/issue/${key}/transitions`, {}, `Reading transitions of ${key}`);
+  const done = transitions.find((t) => t.to?.statusCategory?.key === 'done');
+  if (!done) throw new Error(`No transition to Done is available for ${key}. Check the workflow of this space.`);
+  await jira(route`/rest/api/3/issue/${key}/transitions`, {
+    method: 'POST',
+    body: JSON.stringify({ transition: { id: done.id } }),
+  }, `Closing ${key}`);
+  return key;
+}
+
+resolver.define('loadDemoHistory', async ({ context }) => {
+  const projectKey = assertProjectKey(context.extension.project.key);
+
+  // Never mix demo tickets into a project that already has real history.
+  const existing = await searchHistory(projectKey);
+  if (existing.length > 0) {
+    throw new Error('This space already has completed work, so Estimate Guard is using that instead of demo data.');
+  }
+
+  const project = await jira(route`/rest/api/3/project/${projectKey}`, {}, 'Reading the space');
+  const types = (project.issueTypes ?? []).filter((t) => !t.subtask);
+  const type = types.find((t) => /^task$/i.test(t.name)) ?? types[0];
+  if (!type) throw new Error('This space has no work type that can be created.');
+
+  // Create one first, so a configuration problem fails fast with a clear message.
+  const keys = [await createDemoTicket(projectKey, type.id, DEMO_TICKETS[0])];
+  keys.push(...(await Promise.all(DEMO_TICKETS.slice(1).map((t) => createDemoTicket(projectKey, type.id, t)))));
+
+  await clearHistory(projectKey, context.accountId);
+  return { created: keys.length, keys, label: DEMO_LABEL };
 });
 
 export const handler = resolver.getDefinitions();

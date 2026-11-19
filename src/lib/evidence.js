@@ -244,6 +244,9 @@ export function predict(target, history) {
 // at Done like any warning, so the team and the app are both held to account.
 export const OVERRIDE_LABEL = 'estimate-override';
 
+// Put on every ticket made by "Load demo history", so they are easy to find and delete.
+export const DEMO_LABEL = 'estimate-guard-demo';
+
 const hasOverride = (labels) => (labels ?? []).some((l) => String(l).toLowerCase() === OVERRIDE_LABEL);
 
 /**
@@ -328,7 +331,8 @@ export function groupTable(issues) {
   };
   for (const issue of issues) {
     add('Issue type', issue.issueType, issue);
-    issue.labels.forEach((label) => add('Label', label, issue));
+    // The demo marker is for cleanup, not an area of work, so it gets no row.
+    issue.labels.filter((label) => label !== DEMO_LABEL).forEach((label) => add('Label', label, issue));
   }
   return [...groups.values()]
     .map(({ kind, name, issues: members }) => ({ kind, name, ...summarize(members) }))

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import ForgeReconciler, { Box, DynamicTable, Heading, Inline, Link, Lozenge, SectionMessage, Spinner, Stack, Text, xcss } from '@forge/react';
+import ForgeReconciler, { Box, Button, DynamicTable, Heading, Inline, Link, Lozenge, SectionMessage, Spinner, Stack, Text, xcss } from '@forge/react';
 import { invoke } from '@forge/bridge';
 
 // Red = broken (>= 1.5x), yellow = optimistic, green = accurate.
@@ -30,16 +30,64 @@ const callOf = (r, threshold) => {
   return overran ? ['removed', 'missed'] : ['default', 'quiet, fine'];
 };
 
+// Shown only on a space with no completed work: one click gives it a history to learn from.
+const DemoOffer = ({ onLoaded }) => {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState(null);
+
+  const load = async () => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      await invoke('loadDemoHistory');
+      onLoaded();
+    } catch (e) {
+      setProblem(e.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <SectionMessage appearance="discovery" title="No completed work to learn from yet">
+      <Stack space="space.100">
+        <Text>
+          Estimate Guard learns from finished tickets that have an original estimate and logged time. To try it now,
+          load a demo history: 8 finished tickets where backend work ran about 2.5x over its estimate and frontend
+          work was accurate.
+        </Text>
+        <Text size="small" color="color.text.subtlest">
+          {'They are created in this space as you, labelled "estimate-guard-demo", so you can find and delete them later.'}
+        </Text>
+        <Inline>
+          <Button appearance="primary" isLoading={busy} onClick={load}>Load demo history</Button>
+        </Inline>
+        {problem && <SectionMessage appearance="warning"><Text>{problem}</Text></SectionMessage>}
+      </Stack>
+    </SectionMessage>
+  );
+};
+
 const App = () => {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
 
+  const refresh = () => invoke('getProjectScorecard').then(setData).catch((e) => setError(e.message || String(e)));
   useEffect(() => {
-    invoke('getProjectScorecard').then(setData).catch((e) => setError(e.message || String(e)));
+    refresh();
   }, []);
 
   if (error) return <SectionMessage appearance="error" title="Could not load the scorecard"><Text>{error}</Text></SectionMessage>;
   if (!data) return <Spinner label="Grading this project" />;
+
+  if (data.analysed === 0) {
+    return (
+      <Stack space="space.200">
+        <Heading size="large">Estimation Accuracy</Heading>
+        <DemoOffer onLoaded={() => { setData(null); refresh(); }} />
+      </Stack>
+    );
+  }
 
   const { overall, grading } = data;
 

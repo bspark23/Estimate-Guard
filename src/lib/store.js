@@ -25,6 +25,12 @@ export async function writeHistory(projectKey, accountId, issues) {
   await kvs.set(historyKey(projectKey, accountId), { issues, cachedAt: Date.now() }, { ttl: HISTORY_TTL });
 }
 
+/** Drop a user's cached history, so freshly created tickets show on the next load. */
+export async function clearHistory(projectKey, accountId) {
+  if (!accountId) return;
+  await kvs.delete(historyKey(projectKey, accountId));
+}
+
 /** What we told the developer, kept so the warning can be graded after the fact. */
 export async function savePrediction(issueKey, prediction) {
   await kvs.set(predictionKey(issueKey), {
